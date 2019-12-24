@@ -14,6 +14,9 @@ def get_thumbnail(filename):
     thumbnail_content = bytes.fromhex(thumbnail_hex)
     thumbnail = Image.open(BytesIO(thumbnail_content))
     thumbnail.show()
+    thumbnail.save('thumbnail.jpg')
+
+
 
 def main() :
     filename = 'C:\\Users\\HancomGMD\\Desktop\\1.jpg'
