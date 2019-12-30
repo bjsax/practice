@@ -9,14 +9,12 @@ namespace Media
         {
             var imageString = BitConverter.ToString(from).Replace("-", "");
 
-            var startIndex = SearchIndex(imageString, "FFD8FF", 1);
+            var startIndex = SearchIndex(imageString, "FFD8FF", 2);
             var endIndex   = SearchIndex(imageString, "FFD9", 1);
 
             var thumbnailString = imageString.Substring(startIndex, endIndex - startIndex + 4);
 
-            var thumbnailImage = StringToByteArray(thumbnailString);
-
-            File.WriteAllBytes(to,thumbnailImage);
+            File.WriteAllBytes(to, StringToByteArray(thumbnailString));
         }
 
         private int SearchIndex (string org, string find, int ordinal)
