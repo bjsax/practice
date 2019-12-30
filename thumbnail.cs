@@ -1,60 +1,45 @@
 ﻿using System;
 using System.IO;
 
-namespace Media
+namespace Image
 {
-    class ImageClass
+    class ThumbnailFinder
     {
-        public void SaveThumbnail(byte[] from, string to)
+        public static byte[] Find(byte[] from)
         {
-            var imageString = BitConverter.ToString(from).Replace("-", "");
+            var startIndex = searchIndex(from, new byte[] { 0xff, 0xd8 }, 2);
+            var endIndex   = searchIndex(from, new byte[] { 0xff, 0xd9 }, 1);
 
-            var startIndex = SearchIndex(imageString, "FFD8FF", 2);
-            var endIndex   = SearchIndex(imageString, "FFD9", 1);
+            if (startIndex == -1 || endIndex == -1)
+                return null;
 
-            var thumbnailString = imageString.Substring(startIndex, endIndex - startIndex + 4);
+            if (startIndex > endIndex)
+                return null;
 
-            File.WriteAllBytes(to, StringToByteArray(thumbnailString));
+            var length = endIndex - startIndex + 1;
+            var result = new byte[length];
+            Array.Copy(from, startIndex, result, 0, length);
+
+            return result;
         }
 
-        private int SearchIndex (string org, string find, int ordinal)
+        private static int searchIndex(byte[] org, byte[] pattern, int nth)
         {
-            var index = 0;
             var count = 0;
 
-            for (var i = 0; i < org.Length; i += 2)
+            for (var i = 0; i < org.Length; i++)
             {
-                if (i + find.Length > org.Length)
-                {
-                    break;
-                }
+                if (i + pattern.Length > org.Length)
+                    return -1;
 
-                if (org.Substring(i, find.Length) == find)
-                {
+                if (org[i] == pattern[0] && org[i+1] == pattern[1])
                     count++;
-                }
 
-                if (count == ordinal)
-                {
-                    index = i;
-                    break;
-                }
+                if (count == nth)
+                    return i;
             }
 
-            return index;
-        }
-
-        private byte[] StringToByteArray(string imageString)
-        {
-            var len = imageString.Length;
-            var bytes = new byte[len / 2];
-
-            for (var i = 0; i < len; i += 2)
-            {
-                bytes[i / 2] = Convert.ToByte(imageString.Substring(i, 2), 16);
-            }
-
-            return bytes;
+            return -1;
         }
     }
 
@@ -62,11 +47,11 @@ namespace Media
     {
         static void Main(string[] args)
         {
-            ImageClass image = new ImageClass();
-
             var jpgImage = File.ReadAllBytes(@"C:\Users\HancomGMD\Desktop\1.jpg");
-       
-            image.SaveThumbnail(jpgImage, @"C:\Users\HancomGMD\Desktop\1(thumbnail).jpg");
+
+            var thumbnail = ThumbnailFinder.Find(from: jpgImage);
+            if (thumbnail != null)
+                File.WriteAllBytes(path: @"C:\Users\HancomGMD\Desktop\1(thumbnail).jpg",thumbnail);
         }
     }
 }
