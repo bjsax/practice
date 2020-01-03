@@ -51,17 +51,17 @@ namespace SetAlgorithm
                 list2.Add(r);
             }
 
-            var myset = Set.Converter(from: list2);
+            var set2 = Set.Converter(from: list2);
             Console.WriteLine("list length\t: " + list.Count);
             Console.WriteLine("existing set length : "+ set.Count);
-            Console.WriteLine("my set length\t: " + myset.Count);
+            Console.WriteLine("my set length\t: " + set2.Count);
 
             foreach(var e in list)
                 Console.Write(e+" ");
 
             Console.WriteLine("\n");
 
-            foreach(var e in myset)
+            foreach(var e in set2)
                 Console.Write(e+" ");
         }
     }
