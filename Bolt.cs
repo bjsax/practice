@@ -1,109 +1,85 @@
 ﻿using System;
 using System.IO;
-using System.Data;
 using System.Collections.Generic;
 using MD.IO.Buffer;
 
-namespace KeyValueDB
+namespace MD.BoltReader
 {
-    class Bucket
+    public class Bucket
     {
-        string BucketName;
-        long pgID;
-        Dictionary<string, string> keyValues = new Dictionary<string, string>();
-        Dictionary<string, Bucket> subBucket = new Dictionary<string, Bucket>();
+        public string BucketName { get; set; }
+        public long PageId { get; set; }
 
-        public Bucket(string bucketName, long pgID)
+        private Dictionary<string, string> keyValuePairs = new Dictionary<string, string>();
+        private Dictionary<string, Bucket> subBucket = new Dictionary<string, Bucket>();
+
+        public Bucket(string bucketName, long pgId)
         {
-            this.BucketName = bucketName;
-            this.pgID = pgID * 0x1000;
+            BucketName = bucketName;
+            PageId = pgId;
         }
 
-        public long GetPageID()
+        public void SetkeyValuePairs(string keyName, string valueName)
         {
-            return this.pgID;
+            if (!keyValuePairs.ContainsKey(keyName))
+                keyValuePairs.Add(keyName, valueName);
         }
 
-        public void SetPageID(long pgID)
+        public void SetSubBucket(string bucketName, long pgId)
         {
-            this.pgID = pgID * 0x1000;
-        }
-
-        public void SetKeyValues(string key, string value)
-        {
-            if(!keyValues.ContainsKey(key))
-                this.keyValues.Add(key, value);
-        }
-
-        public void SetSubBucket(string bucketName, long pgID)
-        {
-            var subBucket = new Bucket(bucketName, pgID);
+            var subBucket = new Bucket(bucketName, pgId);
             this.subBucket.Add(bucketName, subBucket);
         }
 
-        public string[] GetKeys()
+        public List<string> GetKeys()
         {
-            if (keyValues.Count == 0)
-                return null;
-
-            var keys = new string[keyValues.Count];
-            var i = 0;
-            
-            foreach(var key in keyValues.Keys)
-            {
-                keys[i] = key;
-                i++;
-            }
-
-            return keys;
+            return new List<string>(keyValuePairs.Keys);
         }
 
-        public string GetValueOf(string key)
+        public string GetValueOf(string keyName)
         {
-            if (keyValues.ContainsKey(key))
-                return keyValues[key];
-            else
-                return null;
+            return keyValuePairs.ContainsKey(keyName)
+                ? keyValuePairs[keyName]
+                : null;
         }
 
-        public string GetBucketName()
+        public List<string> GetSubBucketNames()
         {
-            return BucketName;
+            return new List<string>(subBucket.Keys);
         }
 
-        public string[] GetSubBucketNames()
+        public Bucket GetSubBucketOf(string bucketName)
         {
-            if (subBucket.Count == 0)
-                return null;
-
-            var names = new string[subBucket.Count];
-            var i = 0;
-
-            foreach (var name in subBucket.Keys)
-            {
-                names[i] = name;
-                i++;
-            }
-
-            return names;
-        }
-
-        public Bucket GetSubBucketOf(string name)
-        {
-            if (subBucket.ContainsKey(name))
-                return subBucket[name];
-            else
-                return null;
+            return subBucket.ContainsKey(bucketName)
+                ? subBucket[bucketName]
+                : null;
         }
     }
 
-    class BoltDB
+    public enum PageFlag
     {
-        FileStream fs;
-        Bucket root;
+        Leaf = 0x02,
+        Branch = 0x01
+    }
+
+    public enum LeafFlag
+    {
+        KeyValuePair = 0x00,
+        SubBucket = 0x01
+    }
+
+    public class BoltDB
+    {
+        const int metaPageN = 2; // MetaPage<1>, MetaPage<2>
+        const int inlineBucketID = 0;
+
+        private Bucket root;
+        public bool IsValid { get; private set; }
 
         public BoltDB(string fileName)
         {
+            FileStream fs;
+
             try
             {
                 fs = new FileStream(fileName, FileMode.Open, FileAccess.Read);
@@ -112,62 +88,57 @@ namespace KeyValueDB
             {
                 fs = null;
             }
+
+            IsValid = init(fs);
+        }
+        
+        public Bucket GetRoot()
+        {
+            return IsValid ? root : null;
         }
 
-        public bool IsValid()
+        public void PrintSubBucket(Bucket bucket)
         {
-            if (fs == null)
-                return false;
+            if (!IsValid)
+                return;
 
-            byte[] magic = new byte[] { 0xED, 0xDA, 0x0C, 0xED };
+            Console.WriteLine("Bucket : " + bucket.BucketName);
 
-            for (long i = 0; i < 2; i++) //MetaPage<1>, MetaPage<2>의 magic number를 비교
+            if (bucket.GetSubBucketNames().Count != 0)
             {
-                var buffer = readPrefix(0x1000 * i + 0x10);
-
-                for (var j = 0; j < 4; j++) //magic number 4자리 비교
-                {
-                    if (!(magic[j] == buffer[j])) 
-                    {
-                        fs.Close();
-                        return false;
-                    }
-                }
+                foreach (var name in bucket.GetSubBucketNames())
+                    Console.WriteLine("- subBucket : " + name);
+            }
+            else
+            {
+                Console.WriteLine("no subBucket");
             }
 
-            return true;
+            Console.WriteLine();
         }
 
-        public bool Build()
+        public void PrintSubBucketList(Bucket rootBucket)
         {
-            try
-            {
-                var buffer = readPrefix(at: 0x20); // BucketHeader in MetaPage<1>
-                root = new Bucket("root", readbucketHeader(buffer)); // 사용자가 만든 Bucket이 아니라 임의의 Bucket
-                traverse(root);
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                fs.Close();
-            }
+            if (!IsValid)
+                return;
 
-            return true;
-        } 
+            PrintSubBucket(rootBucket);
 
-        public Bucket GetRootBucket()
-        {
-            return root;
+            if (rootBucket.GetSubBucketNames().Count != 0)
+            {
+                foreach (var name in rootBucket.GetSubBucketNames())
+                    PrintSubBucketList(rootBucket.GetSubBucketOf(name));
+            }
         }
 
         public void PrintLeafNode(Bucket bucket)
         {
-            Console.WriteLine("Bucket : " + bucket.GetBucketName());
+            if (!IsValid)
+                return;
 
-            if (bucket.GetKeys() != null)
+            Console.WriteLine("Bucket : " + bucket.BucketName);
+
+            if (bucket.GetKeys().Count != 0)
             {
                 foreach (var key in bucket.GetKeys())
                     Console.WriteLine("(" + key + ") " + "(" + bucket.GetValueOf(key) + ")");
@@ -176,8 +147,8 @@ namespace KeyValueDB
             {
                 Console.WriteLine("KeyValue is empty");
             }
-            
-            if (bucket.GetSubBucketNames() != null)
+
+            if (bucket.GetSubBucketNames().Count != 0)
             {
                 foreach (var name in bucket.GetSubBucketNames())
                     Console.WriteLine("subBucket : " + name);
@@ -190,20 +161,76 @@ namespace KeyValueDB
             Console.WriteLine();
         }
 
-        public void PrintAll(Bucket root)
+        public void PrintAll(Bucket rootBucket)
         {
-            PrintLeafNode(root);
+            if (!IsValid)
+                return;
 
-            if (root.GetSubBucketNames() != null)
+            PrintLeafNode(rootBucket);
+
+            if (rootBucket.GetSubBucketNames().Count != 0)
             {
-                foreach (var name in root.GetSubBucketNames())
-                {
-                    PrintAll(root.GetSubBucketOf(name));
-                }
+                foreach (var name in rootBucket.GetSubBucketNames())
+                    PrintAll(rootBucket.GetSubBucketOf(name));
             }
         }
 
-        private byte[] readPrefix(long at, int length=0x10)
+        private bool init(FileStream fs)
+        {
+            if (fs == null)
+                return false;
+            
+            try
+            {
+                if (checkMagicNumbers(fs))
+                    root = build(fs, root);
+                else
+                    return false;
+            }
+            catch
+            {
+                root = null;
+                return false;
+            }
+            finally
+            {
+                fs.Close();
+            }
+
+            return true;
+        }
+
+        private bool checkMagicNumbers(FileStream fs)
+        {
+            var magicNumbers = new byte[] { 0xED, 0xDA, 0x0C, 0xED };
+
+            for (var i = 0; i < metaPageN; i++)
+            {
+                var magicIndex = (long)(0x1000 * i + 0x10);
+                var buffer = readPrefix(fs, at: magicIndex);
+
+                for (var j = 0; j < magicNumbers.Length; j++)
+                {
+                    if (magicNumbers[j] != buffer[j])
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private Bucket build(FileStream fs, Bucket root)
+        {
+            var rootHeader = readPrefix(fs, at: 0x20); // rootHeader in MetaPage<1>
+            var rootPageId = getBucketPgId(from: rootHeader) * 0x1000;
+            root = new Bucket("Root", rootPageId); // tempBucket
+
+            reconstruct(fs, root);
+
+            return root;
+        }
+       
+        private byte[] readPrefix(FileStream fs, long at, int length=0x10)
         {
             var buffer = new byte[length];
             fs.Seek(at, SeekOrigin.Begin);
@@ -212,134 +239,109 @@ namespace KeyValueDB
             return buffer;
         }
 
-        private void traverse(Bucket bucket, long seekPoint= -1)
+        private void reconstruct(FileStream fs, Bucket bucket, long seekPoint= -1)
         {
             var offset = seekPoint == -1
-                ? bucket.GetPageID()
+                ? bucket.PageId
                 : seekPoint;
 
-            var buffer = readPrefix(at: offset);
-            var pageInf = readpageHeader(buffer); // pageflag, itemcount
+            var pageHeader = readPrefix(fs, at: offset);
+            var pageInfo = getPageInfo(from: pageHeader); // pageFlag, itemCount
+
+            var itemCount = pageInfo["itemCount"];
             var cursor = offset + 0x10;
 
-            if (pageInf.Item1 == 0x02) // leaf page
+            if (pageInfo["pageFlag"] == (short)PageFlag.Leaf) // leaf page
             {
-                for (var i = 0; i < pageInf.Item2; i++) // item count 만큼 반복해서 읽기
+                for (var i = 0; i < itemCount; i++)
                 {
-                    buffer = readPrefix(at: cursor);
-                    readLeafNode(bucket, buffer, cursor);
+                    var leafHeader = readPrefix(fs, at: cursor);
+                    analyzeLeafNode(fs, bucket, leafHeader, cursor);
                     cursor += 0x10;
                 }
             }
-            else if (pageInf.Item1 == 0x01) // branch page : 어차피 정보는 leaf에 모두 모이기 때문에 페이지를 넘겨주기만 하면 된다
+            else if (pageInfo["pageFlag"] == (short)PageFlag.Branch) // branch page
             {
-                for (var i = 0; i < pageInf.Item2; i++) // item count 만큼 반복해서 읽기
+                for (var i = 0; i < itemCount; i++) 
                 {
-                    buffer = readPrefix(at: cursor);
-                    bucket.SetPageID(readbranchHeader(buffer));
-                    traverse(bucket);
+                    var branchHeader = readPrefix(fs, at: cursor);
+                    bucket.PageId = getBranchPgId(from: branchHeader) * 0x1000;
+                    reconstruct(fs, bucket);
                     cursor += 0x10;
                 }
             }
         }
         
-        private void readLeafNode(Bucket bucket, byte[] buffer, long cursor)
+        private void analyzeLeafNode(FileStream fs, Bucket bucket, byte[] leafHeader, long cursor)
         {
-            var leafInf = readleafHeader(buffer);
-            var buffer2 = readPrefix(at: cursor + leafInf[1], length: leafInf[2] + leafInf[3]);
+            var leafInfo = getLeafInfo(from: leafHeader);
+
+            var offset = cursor + leafInfo["position"];
+            var length = leafInfo["keySize"] + leafInfo["valueSize"];
+
+            var buffer = readPrefix(fs, at: offset, length);
             
-            var byteBuffer = new ByteBuffer2(buffer2, 0x00, leafInf[2]);
+            var bb = new ByteBuffer2(buffer, 0, leafInfo["keySize"]);
 
-            if (leafInf[0] == 0) // leaf가 key-value인 경우
+            if (leafInfo["leafFlag"] == (int)LeafFlag.KeyValuePair)
             {
-                bucket.SetKeyValues(byteBuffer.GetStringUTF8(leafInf[2]), byteBuffer.GetStringUTF8(leafInf[3]));
+                var keyName = bb.GetStringUTF8(leafInfo["keySize"]);
+                var valueName = bb.GetStringUTF8(leafInfo["valueSize"]);
+
+                bucket.SetkeyValuePairs(keyName, valueName);
             }
-            else if (leafInf[0] == 1) //leaf가 subBucket인 경우
+            else if (leafInfo["leafFlag"] == (int)LeafFlag.SubBucket)
             {
-                var subBucketName = byteBuffer.GetStringUTF8(leafInf[2]);
-                var subBucketPageID = readbucketHeader(byteBuffer.GetBytes(0x0010));
+                var subBucketName = bb.GetStringUTF8(leafInfo["keySize"]);
+                var subBucketHeader = bb.GetBytes(0x10);
+                var subBucketPgId = getBucketPgId(from: subBucketHeader);
                 
-                bucket.SetSubBucket(subBucketName, subBucketPageID);
-                
-                if (subBucketPageID != 0) //split된 경우 or branch page로 가는 경우
-                {
-                    traverse(bucket.GetSubBucketOf(subBucketName));
-                }
-                else    //inline bucket인 경우
-                {
-                    traverse(bucket.GetSubBucketOf(subBucketName), cursor + leafInf[1] + leafInf[2] + 0x0010);  //같은 page에서 Traverse
-                }
+                bucket.SetSubBucket(subBucketName, subBucketPgId * 0x1000);
+
+                long seekPoint = -1; // split or branch
+
+                if (subBucketPgId == inlineBucketID) // inlineBucketID = 0
+                    seekPoint = (long)(cursor + leafInfo["position"] + leafInfo["keySize"] + 0x10);
+
+                reconstruct(fs, bucket.GetSubBucketOf(subBucketName), seekPoint);
             }
         }
 
-        private (short, short) readpageHeader(byte[] buffer)
+        private Dictionary<string,short> getPageInfo(byte[] from) // from Page Header
         {
-            var byteBuffer = new ByteBuffer2(buffer, 0x0008, 0x0002);
-            var pageFlag = byteBuffer.GetInt16LE();
-            var count = byteBuffer.GetInt16LE();
+            var bb = new ByteBuffer2(from, 8, 2);
 
-            return (pageFlag, count);
-        }
-
-        private long readbucketHeader(byte[] buffer)
-        {
-            var byteBuffer = new ByteBuffer2(buffer, 0x0000, 0x0008);
-            var BucketPageID = byteBuffer.GetInt64LE();
-
-            return BucketPageID;
-        }
-
-        private int[] readleafHeader(byte[] buffer)
-        {
-            var byteBuffer = new ByteBuffer2(buffer, 0x0000, 0x0004);
-            var leafInf = new int[4];
-
-            for (var i = 0; i < 4; i++)
-                leafInf[i] = byteBuffer.GetInt32LE(); // section, position, keysize, valuesize
-
-            return leafInf;
-        }
-
-        private long readbranchHeader(byte[] buffer)
-        {
-            var byteBuffer = new ByteBuffer2(buffer, 0x0008, 0x0008);
-            var branchPageID = byteBuffer.GetInt64LE();
-
-            return branchPageID;
-        }
-    }
-
-    class MainClass
-    {
-        static void Main(string[] args)
-        {
-            var fileName = @"C:\Workspace\src\depth3.db";
-            var bolt = new BoltDB(fileName);
-
-            if (!bolt.IsValid())
-                return;
-
-            if (!bolt.Build())
-                return;
-
-            var root = bolt.GetRootBucket();
-
-            foreach(var name in root.GetSubBucketNames())
+            return new Dictionary<string, short>
             {
-                Console.WriteLine(name);
-            }
+                { "pageFlag", bb.GetInt16LE() },
+                { "itemCount", bb.GetInt16LE() }
+            };
+        }
 
-            if (root.GetKeys() != null)
-            {
-                foreach (var key in root.GetKeys())
-                {
-                    Console.WriteLine(root.GetValueOf(key));
-                }
-            }
+        private long getBucketPgId(byte[] from) // from Bucket Header
+        {
+            var bb = new ByteBuffer2(from, 0, 8);
 
-            bolt.PrintLeafNode(root);
-            
-            bolt.PrintAll(root);
+            return bb.GetInt64LE();
+        }
+
+        private Dictionary<string, int> getLeafInfo(byte[] from) // from Leaf Header
+        {
+            var bb = new ByteBuffer2(from, 0, 4);
+
+            return new Dictionary<string, int> {
+                { "leafFlag", bb.GetInt32LE() },
+                { "position", bb.GetInt32LE() },
+                { "keySize", bb.GetInt32LE() },
+                { "valueSize", bb.GetInt32LE() }
+            };
+        }
+
+        private long getBranchPgId(byte[] from) // from Branch Header
+        {
+            var bb = new ByteBuffer2(from, 8, 8);
+
+            return bb.GetInt64LE();
         }
     }
 }
